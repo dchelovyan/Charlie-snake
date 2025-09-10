@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>Крольмейка</title>
+  <title>Крольмейкаr</title>
   <style>
     html, body {
       height: 100%; margin: 0; background:#0b1220; color:#fff;
@@ -16,7 +16,7 @@
     canvas { width: 100%; height: auto; background:#0e1a33; border-radius:16px; box-shadow: 0 6px 30px rgba(0,0,0,.35); touch-action:none }
     .hint { text-align:center; margin-top:10px; font-size:12px; opacity:.75 }
 
-    /* Экранные стрелки (D-pad) */
+    /* Экранные стрелки */
     .controls {
       margin-top: 12px;
       display: grid;
@@ -51,8 +51,8 @@
     <div>Рекорд: <span id="best">0</span></div>
   </div>
 
-  <!-- Уменьшённый канвас: 288x432 (18x27 клеток при GRID=16) -->
-  <canvas id="game" width="288" height="432" aria-label="Rabbit Runner"></canvas>
+  <!-- Уменьшённый канвас: 256x352 (16x22 клеток) -->
+  <canvas id="game" width="256" height="352" aria-label="Rabbit Runner"></canvas>
 
   <!-- Экранные стрелки -->
   <div class="controls" aria-label="Экранные стрелки">
@@ -108,7 +108,7 @@ Promise.allSettled([
   loadImage(IMG_HEAD_SRC).then(img=> assets.head=img),
   loadImage(IMG_BELLY_SRC).then(img=> assets.belly=img),
   loadImage(IMG_TAIL_SRC).then(img=> assets.tail=img),
-]).then(()=> {/* готово */});
+]);
 
 /* ====== Состояние игры ====== */
 function createCenteredRabbit(){
@@ -269,8 +269,6 @@ function update(dt){
 /* ====== Отрисовка ====== */
 function render(){
   drawGridBg();
-
-  // еда
   drawCellRect(carrot.x, carrot.y, '#133b18');
   ctx.font = (GRID-2) + "px serif";
   ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -279,7 +277,6 @@ function render(){
   const useSprites = assets.head && assets.belly && assets.tail;
 
   if (rabbit.trail.length > 0){
-    // хвост
     if (rabbit.trail.length >= 2){
       const tailIdx = rabbit.trail.length - 1;
       const tail = rabbit.trail[tailIdx];
@@ -291,8 +288,6 @@ function render(){
         drawCellRect(tail.x, tail.y, '#195f78');
       }
     }
-
-    // пузико (средние сегменты)
     for (let i=1; i<rabbit.trail.length-1; i++){
       const prev = rabbit.trail[i-1];
       const seg  = rabbit.trail[i];
@@ -304,8 +299,6 @@ function render(){
         drawCellRect(seg.x, seg.y, '#19704f');
       }
     }
-
-    // голова
     const head = rabbit.trail[0];
     const headAngle = dirToAngle(rabbit.dx, rabbit.dy);
     if (useSprites) {
@@ -333,15 +326,11 @@ function turn(dx,dy){
   if (justTurned) return;
   if (dx !== 0 && rabbit.dx === -dx) return;
   if (dy !== 0 && rabbit.dy === -dy) return;
-
   if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
-
   if (dx!==0 || dy!==0){
     rabbit.dx = dx; rabbit.dy = dy; justTurned = true;
   }
 }
-
-/* Клавиатура */
 window.addEventListener('keydown', (e)=>{
   const k = e.key.toLowerCase();
   if (k==='arrowleft' || k==='a') turn(-1,0);
@@ -350,8 +339,6 @@ window.addEventListener('keydown', (e)=>{
   else if (k==='arrowdown' || k==='s') turn(0,1);
   else if (k==='r' && !running) reset();
 });
-
-/* Экранные стрелки */
 function bindPad(btn, dx, dy){
   const handler = (ev)=>{ ev.preventDefault(); turn(dx,dy); };
   btn.addEventListener('pointerdown', handler, {passive:false});
@@ -362,11 +349,8 @@ bindPad(document.getElementById('btnDown'),  0,  1);
 bindPad(document.getElementById('btnLeft'), -1,  0);
 bindPad(document.getElementById('btnRight'), 1,  0);
 
-/* Главная кнопка Telegram — рестарт */
 if (tg) {
-  try {
-    tg.MainButton.onClick(() => { if (!running) reset(); });
-  } catch (e) {}
+  try { tg.MainButton.onClick(() => { if (!running) reset(); }); } catch (e) {}
 }
 </script>
 </body>
