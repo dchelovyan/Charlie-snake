@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Rabbit Runner</title>
+  <style>
+    html, body {
+      height: 100%; margin: 0; background:#0b1220; color:#fff;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .wrap { width: 100%; max-width: 420px; padding: 16px; box-sizing: border-box; }
+    h1 { margin: 0 0 8px; font-size: 20px; text-align:center; opacity:.9 }
+    .hud { display:flex; justify-content:space-between; margin: 6px 0 10px; font-size:14px; opacity:.9 }
+    canvas { width: 100%; height: auto; background:#0e1a33; border-radius:16px; box-shadow: 0 6px 30px rgba(0,0,0,.35); touch-action:none }
+    .hint { text-align:center; margin-top:10px; font-size:12px; opacity:.75 }
+    .btn { display:inline-block; background:#1e2b55; padding:8px 14px; border-radius:10px; cursor:pointer; user-select:none }
+    .center { text-align:center; margin-top:10px }
+  </style>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐇 Rabbit Runner</h1>
+  <div class="hud">
+    <div>Счёт: <span id="score">0</span></div>
+    <div>Рекорд: <span id="best">0</span></div>
+  </div>
+  <canvas id="game" width="320" height="480" aria-label="Rabbit Runner"></canvas>
+  <div class="center"><span class="btn" id="restartBtn" hidden>Играть снова</span></div>
+  <div class="hint">Управление: стрелки / WASD • на телефоне — свайпы</div>
+</div>
+
+<script>
+/* ====== Telegram Mini App UX ====== */
+const tg = window.Telegram?.WebApp;
+if (tg) { try { tg.expand(); } catch(e){} }
+
+/* ====== Игровые настройки ====== */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const restartBtn = document.getElementById('restartBtn');
+
+const GRID = 16;
+const COLS = Math.floor(canvas.width / GRID);
+const ROWS = Math.floor(canvas.height / GRID);
+const SPEED_START = 8;
+const SPEED_STEP = 0.25;
+
+/* ====== ПУТИ КАРТИНОК (лучше относительные пути/URL) ====== */
+const IMG_HEAD_SRC  = "assets/rabbit_head.png";   // голова
+const IMG_BELLY_SRC = "assets/rabbit_belly.png";  // пузико
+const IMG_TAIL_SRC  = "assets/rabbit_tail.png";   // хвост
+
+/* ====== Загрузка изображений ====== */
+function loadImage(src){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+const assets = { head:null, belly:null, tail:null };
+Promise.allSettled([
+  loadImage(IMG_HEAD_SRC).then(img=> assets.head=img),
+  loadImage(IMG_BELLY_SRC).then(img=> assets.belly=img),
+  loadImage(IMG_TAIL_SRC).then(img=> assets.tail=img),
+]).then(()=> {/* готово */});
+
+/* ====== Состояние игры ====== */
+function createCenteredRabbit(){
+  const cx = Math.floor(COLS/2);
+  const cy = Math.floor(ROWS/2);
+  return {
+    x: cx, y: cy,
+    dx: 0, dy: 0,                   // старт без движения
+    trail: [{ x: cx, y: cy }],
+    len: 3
+  };
+}
+
+let rabbit = createCenteredRabbit();
+let carrot = spawnCarrot();
+let score = 0, best = Number(localStorage.getItem('rr_best')||0);
+let speed = SPEED_START;
+let tickAccum = 0;
+let last = performance.now();
+let running = true;
+let justTurned = false;
+let autoStartTimer = null;
+let growInMiddlePending = false;    // рост в середине
+
+bestEl.textContent = best;
+
+/* ====== Утилиты отрисовки ====== */
+function drawCellRect(x,y,color) {
+  const px = x*GRID, py = y*GRID;
+  ctx.fillStyle = color;
+  ctx.fillRect(px+1, py+1, GRID-2, GRID-2);
+}
+function drawImageRot(img, x, y, angleRad){
+  const px = x*GRID + GRID/2;
+  const py = y*GRID + GRID/2;
+  const size = GRID;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(angleRad);
+  ctx.drawImage(img, -size/2+1, -size/2+1, size-2, size-2);
+  ctx.restore();
+}
+function dirToAngle(dx,dy){
+  if (dx===1 && dy===0) return 0;
+  if (dx===-1 && dy===0) return Math.PI;
+  if (dx===0 && dy===-1) return -Math.PI/2;
+  if (dx===0 && dy===1) return Math.PI/2;
+  return 0;
+}
+function segmentDir(a,b){
+  return { dx: Math.sign(b.x - a.x), dy: Math.sign(b.y - a.y) };
+}
+
+/* Новое: угол поворота для среднего сегмента по соседям */
+function bellyAngle(prev, curr, next) {
+  const dx1 = prev.x - curr.x;
+  const dy1 = prev.y - curr.y;
+  const dx2 = next.x - curr.x;
+  const dy2 = next.y - curr.y;
+
+  // прямой участок
+  if (dx1 === dx2) return Math.PI/2; // вертикаль
+  if (dy1 === dy2) return 0;         // горизонталь
+
+  // поворот: ориентируем по направлению "вперёд" (к next)
+  return dirToAngle(next.x - curr.x, next.y - curr.y);
+}
+
+/* ====== Фон ====== */
+function drawGridBg(){
+  ctx.fillStyle = '#0e1a33';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let x=1; x<COLS; x++){ ctx.beginPath(); ctx.moveTo(x*GRID,0); ctx.lineTo(x*GRID, canvas.height); ctx.stroke(); }
+  for (let y=1; y<ROWS; y++){ ctx.beginPath(); ctx.moveTo(0,y*GRID); ctx.lineTo(canvas.width, y*GRID); ctx.stroke(); }
+}
+
+/* ====== Логика ====== */
+function spawnCarrot() {
+  while (true) {
+    const c = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS) };
+    if (!rabbit.trail.some(t => t.x===c.x && t.y===c.y) && !(rabbit.x===c.x && rabbit.y===c.y)) return c;
+  }
+}
+
+function reset() {
+  if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
+
+  score = 0; scoreEl.textContent = score;
+  speed = SPEED_START;
+  tickAccum = 0;
+  last = performance.now();
+  running = true;
+  justTurned = false;
+  growInMiddlePending = false;
+
+  rabbit = createCenteredRabbit();
+  carrot = spawnCarrot();
+
+  restartBtn.hidden = true;
+  if (tg) { try { tg.MainButton.hide(); } catch(e){} }
+
+  autoStartTimer = setTimeout(() => {
+    if (running && rabbit.dx === 0 && rabbit.dy === 0) {
+      rabbit.dx = 1; rabbit.dy = 0;
+    }
+    autoStartTimer = null;
+  }, 500);
+
+  drawGridBg();
+  render();
+}
+
+function gameOver() {
+  running = false;
+  if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
+  restartBtn.hidden = false;
+  if (tg) {
+    try { tg.MainButton.setText('Играть снова'); tg.MainButton.show(); } catch(e){}
+  }
+}
+
+function update(dt){
+  if (!running) return;
+
+  tickAccum += dt;
+  const step = 1 / speed;
+
+  while (tickAccum >= step) {
+    tickAccum -= step;
+
+    if (rabbit.dx === 0 && rabbit.dy === 0) continue;
+
+    // Движение головы
+    rabbit.x += rabbit.dx;
+    rabbit.y += rabbit.dy;
+
+    // Границы = проигрыш
+    if (rabbit.x<0 || rabbit.y<0 || rabbit.x>=COLS || rabbit.y>=ROWS) return gameOver();
+
+    // Обновляем хвост
+    rabbit.trail.unshift({x:rabbit.x, y:rabbit.y});
+    while (rabbit.trail.length > rabbit.len) rabbit.trail.pop();
+
+    // Рост в середине
+    if (growInMiddlePending) {
+      const mid = Math.floor(rabbit.trail.length/2);
+      rabbit.trail.splice(mid, 0, { x: rabbit.trail[mid].x, y: rabbit.trail[mid].y });
+      growInMiddlePending = false;
+    }
+
+    // Самоедство
+    for (let i=1;i<rabbit.trail.length;i++){
+      if (rabbit.trail[i].x===rabbit.x && rabbit.trail[i].y===rabbit.y) return gameOver();
+    }
+
+    // Морковка
+    if (rabbit.x===carrot.x && rabbit.y===carrot.y){
+      rabbit.len++;
+      score++; scoreEl.textContent = score;
+      if (score>best){ best=score; bestEl.textContent=best; localStorage.setItem('rr_best', best); }
+      speed += SPEED_STEP;
+      carrot = spawnCarrot();
+      growInMiddlePending = true;
+    }
+
+    justTurned = false;
+  }
+}
+
+/* ====== Отрисовка ====== */
+function render(){
+  drawGridBg();
+
+  // еда
+  drawCellRect(carrot.x, carrot.y, '#133b18');
+  ctx.font = (GRID-2) + "px serif";
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText('🥕', carrot.x*GRID + GRID/2, carrot.y*GRID + GRID/2 + 1);
+
+  const useSprites = assets.head && assets.belly && assets.tail;
+
+  if (rabbit.trail.length > 0){
+    // хвост
+    if (rabbit.trail.length >= 2){
+      const tailIdx = rabbit.trail.length - 1;
+      const tail = rabbit.trail[tailIdx];
+      const afterTail = rabbit.trail[tailIdx - 1];
+      const {dx, dy} = segmentDir(tail, afterTail);
+      if (useSprites) {
+        drawImageRot(assets.tail, tail.x, tail.y, dirToAngle(dx,dy));
+      } else {
+        drawCellRect(tail.x, tail.y, '#195f78');
+      }
+    }
+
+    // пузико (средние сегменты) — добавлен поворот
+    for (let i=1; i<rabbit.trail.length-1; i++){
+      const prev = rabbit.trail[i-1];
+      const seg  = rabbit.trail[i];
+      const next = rabbit.trail[i+1];
+      if (useSprites) {
+        const ang = bellyAngle(prev, seg, next);
+        drawImageRot(assets.belly, seg.x, seg.y, ang);
+      } else {
+        drawCellRect(seg.x, seg.y, '#19704f');
+      }
+    }
+
+    // голова
+    const head = rabbit.trail[0];
+    const headAngle = dirToAngle(rabbit.dx, rabbit.dy);
+    if (useSprites) {
+      drawImageRot(assets.head, head.x, head.y, headAngle);
+    } else {
+      drawCellRect(head.x, head.y, '#1fa37c');
+      ctx.font = (GRID-3) + "px serif";
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText('🐇', head.x*GRID + GRID/2, head.y*GRID + GRID/2 + 1);
+    }
+  }
+}
+
+function loop(ts){
+  const dt = (ts - last)/1000; last = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ====== Управление ====== */
+function turn(dx,dy){
+  if (!running) return;
+  if (justTurned) return;
+  if (dx !== 0 && rabbit.dx === -dx) return;
+  if (dy !== 0 && rabbit.dy === -dy) return;
+
+  if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
+
+  if (dx!==0 || dy!==0){
+    rabbit.dx = dx; rabbit.dy = dy; justTurned = true;
+  }
+}
+window.addEventListener('keydown', (e)=>{
+  const k = e.key.toLowerCase();
+  if (k==='arrowleft' || k==='a') turn(-1,0);
+  else if (k==='arrowright' || k==='d') turn(1,0);
+  else if (k==='arrowup' || k==='w') turn(0,-1);
+  else if (k==='arrowdown' || k==='s') turn(0,1);
+  else if (k==='r' && !running) reset();
+});
+
+// свайпы
+let sx=0, sy=0, swiping=false;
+canvas.addEventListener('touchstart', (e)=>{ const t=e.touches[0]; sx=t.clientX; sy=t.clientY; swiping=true; }, {passive:true});
+canvas.addEventListener('touchmove', (e)=>{ if(!swiping) return; }, {passive:true});
+canvas.addEventListener('touchend', (e)=>{
+  if (!swiping) return; swiping=false;
+  const t=(e.changedTouches||[])[0]; if(!t) return;
+  const dx = t.clientX - sx, dy = t.clientY - sy;
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+  if (Math.abs(dx) > Math.abs(dy)) turn(dx>0?1:-1,0); else turn(0, dy>0?1:-1);
+});
+
+restartBtn.onclick = reset;
+
+if (tg) {
+  try {
+    tg.MainButton.onClick(() => { if (!running) reset(); });
+  } catch (e) {}
+}
+</script>
+</body>
+</html>
