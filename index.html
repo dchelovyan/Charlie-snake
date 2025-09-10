@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>Rabbit Runner</title>
+  <title>Крольмейка</title>
   <style>
     html, body {
       height: 100%; margin: 0; background:#0b1220; color:#fff;
@@ -15,8 +15,6 @@
     .hud { display:flex; justify-content:space-between; margin: 6px 0 10px; font-size:14px; opacity:.9 }
     canvas { width: 100%; height: auto; background:#0e1a33; border-radius:16px; box-shadow: 0 6px 30px rgba(0,0,0,.35); touch-action:none }
     .hint { text-align:center; margin-top:10px; font-size:12px; opacity:.75 }
-    .btn { display:inline-block; background:#1e2b55; padding:8px 14px; border-radius:10px; cursor:pointer; user-select:none }
-    .center { text-align:center; margin-top:10px }
 
     /* Экранные стрелки (D-pad) */
     .controls {
@@ -42,21 +40,19 @@
     }
     .pad-btn:active { transform: scale(.97); }
     .pad-empty { visibility: hidden; }
-    /* На десктопе можно скрыть, если не нужно:
-    @media (hover: hover) and (pointer: fine) { .controls { display:none; } }
-    */
   </style>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
 <div class="wrap">
-  <h1>🐇 Rabbit Runner</h1>
+  <h1>Крольмейка</h1>
   <div class="hud">
     <div>Счёт: <span id="score">0</span></div>
     <div>Рекорд: <span id="best">0</span></div>
   </div>
-  <canvas id="game" width="320" height="480" aria-label="Rabbit Runner"></canvas>
-  <div class="center"><span class="btn" id="restartBtn" hidden>Играть снова</span></div>
+
+  <!-- Уменьшённый канвас: 288x432 (18x27 клеток при GRID=16) -->
+  <canvas id="game" width="288" height="432" aria-label="Rabbit Runner"></canvas>
 
   <!-- Экранные стрелки -->
   <div class="controls" aria-label="Экранные стрелки">
@@ -86,7 +82,6 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
-const restartBtn = document.getElementById('restartBtn');
 
 const GRID = 16;
 const COLS = Math.floor(canvas.width / GRID);
@@ -94,10 +89,10 @@ const ROWS = Math.floor(canvas.height / GRID);
 const SPEED_START = 8;
 const SPEED_STEP = 0.25;
 
-/* ====== ПУТИ КАРТИНОК (лучше относительные пути/URL) ====== */
-const IMG_HEAD_SRC  = "assets/rabbit_head.png";   // голова
-const IMG_BELLY_SRC = "assets/rabbit_belly.png";  // пузико
-const IMG_TAIL_SRC  = "assets/rabbit_tail.png";   // хвост
+/* ====== ПУТИ КАРТИНОК ====== */
+const IMG_HEAD_SRC  = "assets/rabbit_head.png";
+const IMG_BELLY_SRC = "assets/rabbit_belly.png";
+const IMG_TAIL_SRC  = "assets/rabbit_tail.png";
 
 /* ====== Загрузка изображений ====== */
 function loadImage(src){
@@ -121,7 +116,7 @@ function createCenteredRabbit(){
   const cy = Math.floor(ROWS/2);
   return {
     x: cx, y: cy,
-    dx: 0, dy: 0,                   // старт без движения
+    dx: 0, dy: 0,
     trail: [{ x: cx, y: cy }],
     len: 3
   };
@@ -136,7 +131,7 @@ let last = performance.now();
 let running = true;
 let justTurned = false;
 let autoStartTimer = null;
-let growInMiddlePending = false;    // рост в середине
+let growInMiddlePending = false;
 
 bestEl.textContent = best;
 
@@ -166,19 +161,13 @@ function dirToAngle(dx,dy){
 function segmentDir(a,b){
   return { dx: Math.sign(b.x - a.x), dy: Math.sign(b.y - a.y) };
 }
-
-/* Новое: угол поворота для среднего сегмента по соседям */
 function bellyAngle(prev, curr, next) {
   const dx1 = prev.x - curr.x;
   const dy1 = prev.y - curr.y;
   const dx2 = next.x - curr.x;
   const dy2 = next.y - curr.y;
-
-  // прямой участок
   if (dx1 === dx2) return Math.PI/2; // вертикаль
   if (dy1 === dy2) return 0;         // горизонталь
-
-  // поворот: ориентируем по направлению "вперёд" (к next)
   return dirToAngle(next.x - curr.x, next.y - curr.y);
 }
 
@@ -214,7 +203,6 @@ function reset() {
   rabbit = createCenteredRabbit();
   carrot = spawnCarrot();
 
-  restartBtn.hidden = true;
   if (tg) { try { tg.MainButton.hide(); } catch(e){} }
 
   autoStartTimer = setTimeout(() => {
@@ -231,7 +219,6 @@ function reset() {
 function gameOver() {
   running = false;
   if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
-  restartBtn.hidden = false;
   if (tg) {
     try { tg.MainButton.setText('Играть снова'); tg.MainButton.show(); } catch(e){}
   }
@@ -248,30 +235,24 @@ function update(dt){
 
     if (rabbit.dx === 0 && rabbit.dy === 0) continue;
 
-    // Движение головы
     rabbit.x += rabbit.dx;
     rabbit.y += rabbit.dy;
 
-    // Границы = проигрыш
     if (rabbit.x<0 || rabbit.y<0 || rabbit.x>=COLS || rabbit.y>=ROWS) return gameOver();
 
-    // Обновляем хвост
     rabbit.trail.unshift({x:rabbit.x, y:rabbit.y});
     while (rabbit.trail.length > rabbit.len) rabbit.trail.pop();
 
-    // Рост в середине
     if (growInMiddlePending) {
       const mid = Math.floor(rabbit.trail.length/2);
       rabbit.trail.splice(mid, 0, { x: rabbit.trail[mid].x, y: rabbit.trail[mid].y });
       growInMiddlePending = false;
     }
 
-    // Самоедство
     for (let i=1;i<rabbit.trail.length;i++){
       if (rabbit.trail[i].x===rabbit.x && rabbit.trail[i].y===rabbit.y) return gameOver();
     }
 
-    // Морковка
     if (rabbit.x===carrot.x && rabbit.y===carrot.y){
       rabbit.len++;
       score++; scoreEl.textContent = score;
@@ -311,7 +292,7 @@ function render(){
       }
     }
 
-    // пузико (средние сегменты) — поворот по траектории
+    // пузико (средние сегменты)
     for (let i=1; i<rabbit.trail.length-1; i++){
       const prev = rabbit.trail[i-1];
       const seg  = rabbit.trail[i];
@@ -360,7 +341,7 @@ function turn(dx,dy){
   }
 }
 
-/* Клавиатура (ПК и BT-клавы на телефоне) */
+/* Клавиатура */
 window.addEventListener('keydown', (e)=>{
   const k = e.key.toLowerCase();
   if (k==='arrowleft' || k==='a') turn(-1,0);
@@ -370,7 +351,7 @@ window.addEventListener('keydown', (e)=>{
   else if (k==='r' && !running) reset();
 });
 
-/* Экранные стрелки (клики и тапы) */
+/* Экранные стрелки */
 function bindPad(btn, dx, dy){
   const handler = (ev)=>{ ev.preventDefault(); turn(dx,dy); };
   btn.addEventListener('pointerdown', handler, {passive:false});
@@ -381,18 +362,12 @@ bindPad(document.getElementById('btnDown'),  0,  1);
 bindPad(document.getElementById('btnLeft'), -1,  0);
 bindPad(document.getElementById('btnRight'), 1,  0);
 
-/* Кнопка рестарта */
-restartBtn.onclick = reset;
-
-/* Главная кнопка Telegram */
+/* Главная кнопка Telegram — рестарт */
 if (tg) {
   try {
     tg.MainButton.onClick(() => { if (!running) reset(); });
   } catch (e) {}
 }
-
-/* ==== УДАЛЕНО: свайпы на canvas ==== */
-/* (touchstart/touchmove/touchend больше не используются) */
 </script>
 </body>
 </html>
