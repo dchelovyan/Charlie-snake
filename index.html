@@ -2,13 +2,31 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>Крольмейкаr</title>
+  <!-- важно для Telegram WebApp и айфонов -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Крольмейка</title>
   <style>
+    :root{
+      /* безопасные зоны iOS */
+      --sat: env(safe-area-inset-top);
+      --sar: env(safe-area-inset-right);
+      --sab: env(safe-area-inset-bottom);
+      --sal: env(safe-area-inset-left);
+    }
     html, body {
-      height: 100%; margin: 0; background:#0b1220; color:#fff;
+      height: 100%;
+      margin: 0;
+      background:#0b1220; color:#fff;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      display:flex; align-items:center; justify-content:center;
+    }
+    /* контейнер, который мы масштабируем на 90% */
+    .app-scale{
+      height: 100%;
+      padding: var(--sat) var(--sar) var(--sab) var(--sal);
+      display:flex; align-items:flex-start; justify-content:center;
+      /* главный масштаб −10% */
+      transform: scale(.9);
+      transform-origin: top center;
     }
     .wrap { width: 100%; max-width: 420px; padding: 16px; box-sizing: border-box; }
     h1 { margin: 0 0 8px; font-size: 20px; text-align:center; opacity:.9 }
@@ -44,32 +62,34 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <h1>Крольмейка</h1>
-  <div class="hud">
-    <div>Счёт: <span id="score">0</span></div>
-    <div>Рекорд: <span id="best">0</span></div>
+<div class="app-scale">
+  <div class="wrap">
+    <h1>Крольмейка</h1>
+    <div class="hud">
+      <div>Счёт: <span id="score">0</span></div>
+      <div>Рекорд: <span id="best">0</span></div>
+    </div>
+
+    <!-- Канвас: 256x352 (16x22 клеток) -->
+    <canvas id="game" width="256" height="352" aria-label="Rabbit Runner"></canvas>
+
+    <!-- Экранные стрелки -->
+    <div class="controls" aria-label="Экранные стрелки">
+      <div class="pad-empty"></div>
+      <button class="pad-btn" id="btnUp" aria-label="Вверх">▲</button>
+      <div class="pad-empty"></div>
+
+      <button class="pad-btn" id="btnLeft" aria-label="Влево">◀</button>
+      <div class="pad-empty"></div>
+      <button class="pad-btn" id="btnRight" aria-label="Вправо">▶</button>
+
+      <div class="pad-empty"></div>
+      <button class="pad-btn" id="btnDown" aria-label="Вниз">▼</button>
+      <div class="pad-empty"></div>
+    </div>
+
+    <div class="hint">Управление: стрелки / WASD • на телефоне — экранные стрелки</div>
   </div>
-
-  <!-- Уменьшённый канвас: 256x352 (16x22 клеток) -->
-  <canvas id="game" width="256" height="352" aria-label="Rabbit Runner"></canvas>
-
-  <!-- Экранные стрелки -->
-  <div class="controls" aria-label="Экранные стрелки">
-    <div class="pad-empty"></div>
-    <button class="pad-btn" id="btnUp" aria-label="Вверх">▲</button>
-    <div class="pad-empty"></div>
-
-    <button class="pad-btn" id="btnLeft" aria-label="Влево">◀</button>
-    <div class="pad-empty"></div>
-    <button class="pad-btn" id="btnRight" aria-label="Вправо">▶</button>
-
-    <div class="pad-empty"></div>
-    <button class="pad-btn" id="btnDown" aria-label="Вниз">▼</button>
-    <div class="pad-empty"></div>
-  </div>
-
-  <div class="hint">Управление: стрелки / WASD • на телефоне — экранные стрелки</div>
 </div>
 
 <script>
@@ -114,12 +134,7 @@ Promise.allSettled([
 function createCenteredRabbit(){
   const cx = Math.floor(COLS/2);
   const cy = Math.floor(ROWS/2);
-  return {
-    x: cx, y: cy,
-    dx: 0, dy: 0,
-    trail: [{ x: cx, y: cy }],
-    len: 3
-  };
+  return { x: cx, y: cy, dx: 0, dy: 0, trail: [{ x: cx, y: cy }], len: 3 };
 }
 
 let rabbit = createCenteredRabbit();
@@ -158,16 +173,12 @@ function dirToAngle(dx,dy){
   if (dx===0 && dy===1) return Math.PI/2;
   return 0;
 }
-function segmentDir(a,b){
-  return { dx: Math.sign(b.x - a.x), dy: Math.sign(b.y - a.y) };
-}
+function segmentDir(a,b){ return { dx: Math.sign(b.x - a.x), dy: Math.sign(b.y - a.y) }; }
 function bellyAngle(prev, curr, next) {
-  const dx1 = prev.x - curr.x;
-  const dy1 = prev.y - curr.y;
-  const dx2 = next.x - curr.x;
-  const dy2 = next.y - curr.y;
-  if (dx1 === dx2) return Math.PI/2; // вертикаль
-  if (dy1 === dy2) return 0;         // горизонталь
+  const dx1 = prev.x - curr.x, dy1 = prev.y - curr.y;
+  const dx2 = next.x - curr.x, dy2 = next.y - curr.y;
+  if (dx1 === dx2) return Math.PI/2;
+  if (dy1 === dy2) return 0;
   return dirToAngle(next.x - curr.x, next.y - curr.y);
 }
 
@@ -188,80 +199,48 @@ function spawnCarrot() {
     if (!rabbit.trail.some(t => t.x===c.x && t.y===c.y) && !(rabbit.x===c.x && rabbit.y===c.y)) return c;
   }
 }
-
 function reset() {
   if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
-
   score = 0; scoreEl.textContent = score;
-  speed = SPEED_START;
-  tickAccum = 0;
-  last = performance.now();
-  running = true;
-  justTurned = false;
-  growInMiddlePending = false;
-
-  rabbit = createCenteredRabbit();
-  carrot = spawnCarrot();
-
+  speed = SPEED_START; tickAccum = 0; last = performance.now();
+  running = true; justTurned = false; growInMiddlePending = false;
+  rabbit = createCenteredRabbit(); carrot = spawnCarrot();
   if (tg) { try { tg.MainButton.hide(); } catch(e){} }
-
   autoStartTimer = setTimeout(() => {
-    if (running && rabbit.dx === 0 && rabbit.dy === 0) {
-      rabbit.dx = 1; rabbit.dy = 0;
-    }
+    if (running && rabbit.dx === 0 && rabbit.dy === 0) { rabbit.dx = 1; rabbit.dy = 0; }
     autoStartTimer = null;
   }, 500);
-
-  drawGridBg();
-  render();
+  drawGridBg(); render();
 }
-
 function gameOver() {
   running = false;
   if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
-  if (tg) {
-    try { tg.MainButton.setText('Играть снова'); tg.MainButton.show(); } catch(e){}
-  }
+  if (tg) { try { tg.MainButton.setText('Играть снова'); tg.MainButton.show(); } catch(e){} }
 }
-
 function update(dt){
   if (!running) return;
-
   tickAccum += dt;
   const step = 1 / speed;
-
   while (tickAccum >= step) {
     tickAccum -= step;
-
     if (rabbit.dx === 0 && rabbit.dy === 0) continue;
-
-    rabbit.x += rabbit.dx;
-    rabbit.y += rabbit.dy;
-
+    rabbit.x += rabbit.dx; rabbit.y += rabbit.dy;
     if (rabbit.x<0 || rabbit.y<0 || rabbit.x>=COLS || rabbit.y>=ROWS) return gameOver();
-
     rabbit.trail.unshift({x:rabbit.x, y:rabbit.y});
     while (rabbit.trail.length > rabbit.len) rabbit.trail.pop();
-
     if (growInMiddlePending) {
       const mid = Math.floor(rabbit.trail.length/2);
       rabbit.trail.splice(mid, 0, { x: rabbit.trail[mid].x, y: rabbit.trail[mid].y });
       growInMiddlePending = false;
     }
-
     for (let i=1;i<rabbit.trail.length;i++){
       if (rabbit.trail[i].x===rabbit.x && rabbit.trail[i].y===rabbit.y) return gameOver();
     }
-
     if (rabbit.x===carrot.x && rabbit.y===carrot.y){
-      rabbit.len++;
-      score++; scoreEl.textContent = score;
+      rabbit.len++; score++; scoreEl.textContent = score;
       if (score>best){ best=score; bestEl.textContent=best; localStorage.setItem('rr_best', best); }
-      speed += SPEED_STEP;
-      carrot = spawnCarrot();
-      growInMiddlePending = true;
+      speed += SPEED_STEP; carrot = spawnCarrot(); growInMiddlePending = true;
     }
-
     justTurned = false;
   }
 }
@@ -273,37 +252,24 @@ function render(){
   ctx.font = (GRID-2) + "px serif";
   ctx.textAlign="center"; ctx.textBaseline="middle";
   ctx.fillText('🥕', carrot.x*GRID + GRID/2, carrot.y*GRID + GRID/2 + 1);
-
   const useSprites = assets.head && assets.belly && assets.tail;
-
   if (rabbit.trail.length > 0){
     if (rabbit.trail.length >= 2){
       const tailIdx = rabbit.trail.length - 1;
       const tail = rabbit.trail[tailIdx];
       const afterTail = rabbit.trail[tailIdx - 1];
       const {dx, dy} = segmentDir(tail, afterTail);
-      if (useSprites) {
-        drawImageRot(assets.tail, tail.x, tail.y, dirToAngle(dx,dy));
-      } else {
-        drawCellRect(tail.x, tail.y, '#195f78');
-      }
+      if (useSprites) drawImageRot(assets.tail, tail.x, tail.y, dirToAngle(dx,dy));
+      else drawCellRect(tail.x, tail.y, '#195f78');
     }
     for (let i=1; i<rabbit.trail.length-1; i++){
-      const prev = rabbit.trail[i-1];
-      const seg  = rabbit.trail[i];
-      const next = rabbit.trail[i+1];
-      if (useSprites) {
-        const ang = bellyAngle(prev, seg, next);
-        drawImageRot(assets.belly, seg.x, seg.y, ang);
-      } else {
-        drawCellRect(seg.x, seg.y, '#19704f');
-      }
+      const prev = rabbit.trail[i-1], seg = rabbit.trail[i], next = rabbit.trail[i+1];
+      if (useSprites) drawImageRot(assets.belly, seg.x, seg.y, bellyAngle(prev, seg, next));
+      else drawCellRect(seg.x, seg.y, '#19704f');
     }
-    const head = rabbit.trail[0];
-    const headAngle = dirToAngle(rabbit.dx, rabbit.dy);
-    if (useSprites) {
-      drawImageRot(assets.head, head.x, head.y, headAngle);
-    } else {
+    const head = rabbit.trail[0], headAngle = dirToAngle(rabbit.dx, rabbit.dy);
+    if (useSprites) drawImageRot(assets.head, head.x, head.y, headAngle);
+    else {
       drawCellRect(head.x, head.y, '#1fa37c');
       ctx.font = (GRID-3) + "px serif";
       ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -311,12 +277,9 @@ function render(){
     }
   }
 }
-
 function loop(ts){
   const dt = (ts - last)/1000; last = ts;
-  update(dt);
-  render();
-  requestAnimationFrame(loop);
+  update(dt); render(); requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 
@@ -327,9 +290,7 @@ function turn(dx,dy){
   if (dx !== 0 && rabbit.dx === -dx) return;
   if (dy !== 0 && rabbit.dy === -dy) return;
   if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
-  if (dx!==0 || dy!==0){
-    rabbit.dx = dx; rabbit.dy = dy; justTurned = true;
-  }
+  if (dx!==0 || dy!==0){ rabbit.dx = dx; rabbit.dy = dy; justTurned = true; }
 }
 window.addEventListener('keydown', (e)=>{
   const k = e.key.toLowerCase();
